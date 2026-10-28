@@ -19,9 +19,11 @@ int main(int argc, char **argv) {
   ERPC_WARN("eRPC DPDK daemon: Managing DPDK port %zu on NUMA node %zu\n",
             FLAGS_phy_port, FLAGS_numa_node);
 
+  const std::string lcores_arg = erpc::DpdkTransport::get_eal_lcores_arg();
+
   // clang-format off
   const char *rte_argv[] = {
-      "-c",          "1",
+      "--lcores",    lcores_arg.c_str(),
       "-n",          "6",  // Memory channels
       "-m",          "1024", // Max memory in megabytes
       "--proc-type", "primary",
@@ -70,8 +72,15 @@ int main(int argc, char **argv) {
 
   // Check if the link is up
   struct rte_eth_link link;
-  rte_eth_link_get(static_cast<uint8_t>(FLAGS_phy_port), &link);
-  if (link.link_status != ETH_LINK_UP) {
+  ret = rte_eth_link_get(static_cast<uint16_t>(FLAGS_phy_port), &link);
+  if (ret != 0) {
+    fprintf(stderr,
+            "eRPC DPDK daemon: Error: Failed to get link status of port %zu: "
+            "%s\n",
+            FLAGS_phy_port, strerror(-ret));
+    exit(-1);
+  }
+  if (link.link_status != RTE_ETH_LINK_UP) {
     fprintf(stderr, "eRPC DPDK daemon: Error: Port %zu link is down\n",
             FLAGS_phy_port);
     exit(-1);

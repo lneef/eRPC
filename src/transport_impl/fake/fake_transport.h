@@ -21,7 +21,7 @@ class FakeTransport : public Transport {
 
   FakeTransport(uint16_t, uint8_t rpc_id, uint8_t phy_port, size_t numa_node,
                 FILE *trace_file)
-      : Transport(TransportType::kRaw, rpc_id, phy_port, numa_node,
+      : Transport(TransportType::kFake, rpc_id, phy_port, numa_node,
                   trace_file) {}
 
   inline void init_hugepage_structures(HugeAlloc *, uint8_t **) {}

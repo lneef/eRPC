@@ -102,11 +102,9 @@ class Rpc {
    * sessions are successfully created or destroyed.
    *
    * @param phy_port An Rpc object uses one port on a "datapath" NIC, which
-   * refers to a NIC that supports DPDK or ibverbs. phy_port is the zero-based
-   * index of that port among active ports, same as the one passed to
-   * `rte_eth_dev_info_get` for the DPDK transport; or as listed by
-   * `ibv_devinfo` for Raw, InfiniBand, and RoCE transports. Multiple Rpc
-   * objects may use the same phy_port.
+   * refers to a NIC that supports DPDK. phy_port is the zero-based index of
+   * that port among active ports, same as the one passed to
+   * `rte_eth_dev_info_get`. Multiple Rpc objects may use the same phy_port.
    *
    * @throw runtime_error if construction fails
    */
@@ -1004,10 +1002,10 @@ class Rpc {
   size_t tx_batch_i_ = 0;  ///< The batch index for TX burst array
 
   /// On calling rx_burst(), Transport fills-in packet buffer pointers into the
-  /// RX ring. Some transports such as InfiniBand and Raw reuse RX ring packet
-  /// buffers in a circular order, so the ring's pointers remain unchanged
-  /// after initialization. Other transports (e.g., DPDK) update rx_ring on
-  /// every successful rx_burst.
+  /// RX ring. A transport may reuse RX ring packet buffers in a circular
+  /// order, so that the ring's pointers remain unchanged after initialization.
+  /// Other transports (e.g., DPDK) update rx_ring on every successful
+  /// rx_burst.
   uint8_t *rx_ring_[TTr::kNumRxRingEntries];
   size_t rx_ring_head_ = 0;  ///< Current unused RX ring buffer
 

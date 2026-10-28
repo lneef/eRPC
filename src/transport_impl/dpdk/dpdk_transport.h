@@ -23,6 +23,9 @@
 #include <rte_mbuf.h>
 #include <rte_thash.h>
 #include <signal.h>
+#ifndef _WIN32
+#include <sched.h>
+#endif
 
 namespace erpc {
 
@@ -204,7 +207,7 @@ class DpdkTransport : public Transport {
   static constexpr size_t kNumMbufs = (kNumRxRingEntries * 2 - 1);
 
   // XXX: ixgbe does not support fast free offload, but i40e does
-  static constexpr uint32_t kOffloads = DEV_TX_OFFLOAD_MULTI_SEGS;
+  static constexpr uint32_t kOffloads = RTE_ETH_TX_OFFLOAD_MULTI_SEGS;
 
   /// Per-element size for the packet buffer memory pool
   static constexpr size_t kMbufSize =
@@ -215,6 +218,12 @@ class DpdkTransport : public Transport {
   static constexpr size_t kMaxDataPerPkt = (kMTU - sizeof(pkthdr_t));
 
   static constexpr size_t kRssKeySize = 40;  /// RSS key size in bytes
+
+  /// Environment variable that, if set, overrides the datapath IPv4 address
+  /// (dotted-decimal) used by this process's DPDK port. Without it, the
+  /// address is taken from eth1 on Azure, or derived from the port's MAC
+  /// address elsewhere.
+  static constexpr const char *kSrcIpEnvVar = "ERPC_DPDK_SRC_IP";
 
   /// Key used for RSS hashing
   static constexpr uint8_t kDefaultRssKey[kRssKeySize] = {
@@ -252,6 +261,21 @@ class DpdkTransport : public Transport {
 
   static std::string dpdk_strerror() {
     return std::string(rte_strerror(rte_errno));
+  }
+
+  /// Return the value for the DPDK EAL "--lcores" argument: one lcore (ID 0)
+  /// mapped to the CPU that the calling thread is currently running on. eRPC
+  /// does not use DPDK's lcore threads, so a single lcore suffices. Mapping it
+  /// to the current CPU keeps EAL from pinning the calling thread to a CPU
+  /// outside the process's allowed CPU set. (Older eRPC passed "-c 0x0"; DPDK
+  /// rejects an empty coremask and has deprecated the "-c" option.)
+  static std::string get_eal_lcores_arg() {
+#ifdef _WIN32
+    return "0";
+#else
+    const int cpu = sched_getcpu();
+    return "0@" + std::to_string(cpu >= 0 ? cpu : 0);
+#endif
   }
 
   /// Convert an RX ring data pointer to its corresponding DPDK mbuf pointer

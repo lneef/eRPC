@@ -1,5 +1,12 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.10)
 project(eRPC)
+
+# Some bundled third-party projects (e.g., googletest, willemt_raft) declare a
+# cmake_minimum_required() version that CMake >= 4.0 refuses to configure.
+# Treat them as if they required 3.5 unless the user overrides this.
+if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
 
 include(CMakeDependentOption)
 
@@ -59,8 +66,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build)
 set(DPDK_NEEDED "false")
 
 # Options exposed to the user
-set(TRANSPORT "dpdk" CACHE STRING "Datapath transport (infiniband/raw/dpdk/fake)")
-option(ROCE "Use RoCE if TRANSPORT is infiniband" OFF)
+set(TRANSPORT "dpdk" CACHE STRING "Datapath transport (dpdk/fake)")
 option(AZURE "Configure DPDK for Azure if TRANSPORT is dpdk" OFF)
 option(PERF "Compile for performance" ON)
 set(PGO "none" CACHE STRING "Profile-guided optimization (generate/use/none)")
@@ -140,22 +146,16 @@ set(SOURCES
   src/transport_impl/dpdk/dpdk_init.cc
   src/transport_impl/dpdk/dpdk_externs.cc
   src/transport_impl/dpdk/dpdk_transport_datapath.cc
-  src/transport_impl/infiniband/ib_transport.cc
-  src/transport_impl/infiniband/ib_transport_datapath.cc
-  src/transport_impl/raw/raw_transport.cc
-  src/transport_impl/raw/raw_transport_datapath.cc
   src/transport_impl/fake/fake_transport.cc
   src/util/huge_alloc.cc
   src/util/numautils.cc
   src/util/tls_registry.cc)
 
-# Transport-specific. Mellanox OFED drivers are the best choice for raw and
-# infiniband, but they do not play well with DPDK. So we compile only one
-# transport. Other transports are exluded using preprocessor macros.
+# Transport-specific. Only one transport is compiled; the others are excluded
+# using preprocessor macros.
 string(TOUPPER ${TRANSPORT} DEFINE_TRANSPORT)
 add_definitions(-DERPC_${DEFINE_TRANSPORT}=true)
 message(STATUS "Selected transport = ${TRANSPORT}.")
-set(CONFIG_IS_ROCE false)
 
 if(TRANSPORT STREQUAL "dpdk")
   set(CONFIG_TRANSPORT "DpdkTransport")
@@ -174,34 +174,10 @@ elseif(TRANSPORT STREQUAL "fake")
   set(CONFIG_TRANSPORT "FakeTransport")
   set(CONFIG_HEADROOM 40)
 else()
-  set(CONFIG_IS_AZURE false)
-  find_library(IBVERBS_LIB ibverbs)
-  if(NOT IBVERBS_LIB)
-    message(FATAL_ERROR "ibverbs library not found")
-  endif()
-
-  set(LIBRARIES ${LIBRARIES} ibverbs)
-  if(TRANSPORT STREQUAL "raw")
-    set(CONFIG_TRANSPORT "RawTransport")
-    set(CONFIG_HEADROOM 40)
-    message(FATAL_ERROR
-      "eRPC no longer supports Raw transport, please use DTRANSPORT=dpdk instead. "
-      "If you wish to use the Raw transport, please use this version: "
-      "https://github.com/erpc-io/eRPC/releases/tag/v0.1. You'll need to "
-      "install an old version of Mellanox OFED (4.4 or older).")
-  elseif(TRANSPORT STREQUAL "fake")
-    set(CONFIG_TRANSPORT "FakeTransport")
-    set(CONFIG_HEADROOM 40)
-  elseif(TRANSPORT STREQUAL "infiniband")
-    set(CONFIG_TRANSPORT "IBTransport")
-    if(ROCE)
-      set(CONFIG_HEADROOM 40)
-      set(CONFIG_IS_ROCE true)
-    else()
-      set(CONFIG_HEADROOM 0)
-      set(CONFIG_IS_ROCE false)
-    endif()
-  endif()
+  message(FATAL_ERROR
+    "Unknown TRANSPORT '${TRANSPORT}'. Supported transports: dpdk, fake. "
+    "The ibverbs-based raw and infiniband transports have been removed; "
+    "use TRANSPORT=dpdk, or eRPC v0.1 if you need them.")
 endif()
 
 # Generate config.h
@@ -448,10 +424,6 @@ if(TESTING)
   endforeach()
 
   # Tests for the transport backend implementation
-  if(TRANSPORT STREQUAL "raw")
-    set(TRANSPORT_TESTS
-      raw_transport_test)
-  endif()
   if(TRANSPORT STREQUAL "dpdk")
     set(TRANSPORT_TESTS
       dpdk_ownership_memzone_test)

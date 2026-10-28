@@ -41,9 +41,11 @@ DpdkTransport::DpdkTransport(uint16_t sm_udp_port, uint8_t rpc_id,
     } else {
       ERPC_INFO("DPDK transport for Rpc %u initializing DPDK EAL.\n", rpc_id);
 
+      const std::string lcores_arg = get_eal_lcores_arg();
+
       // clang-format off
       const char *rte_argv[] = {
-          "-c",            "0x0",
+          "--lcores",      lcores_arg.c_str(),
           "-n",            "6",  // Memory channels
           "-m",            "1024", // Max memory in megabytes
           "--proc-type",   "auto",
@@ -175,12 +177,15 @@ void DpdkTransport::resolve_phy_port() {
 
   // Resolve RSS indirection table size
   struct rte_eth_dev_info dev_info;
-  rte_eth_dev_info_get(phy_port_, &dev_info);
+  int ret = rte_eth_dev_info_get(phy_port_, &dev_info);
+  rt_assert(ret == 0, "Failed to get device info for port " +
+                          std::to_string(phy_port_) + ": " + strerror(-ret));
 
   const std::string drv_name = dev_info.driver_name;
   rt_assert(drv_name == "net_mlx4" or drv_name == "net_mlx5" or
-                drv_name == "mlx5_pci",
-            "eRPC supports only mlx4 or mlx5 devices with DPDK");
+                drv_name == "mlx5_pci" or drv_name == "net_ena",
+            "eRPC supports only mlx4, mlx5, or ENA devices with DPDK (got " +
+                drv_name + ")");
 
   if (std::string(dev_info.driver_name) == "net_mlx4") {
     // MLX4 NICs report a reta size of zero, but they use 128 internally
@@ -197,14 +202,16 @@ void DpdkTransport::resolve_phy_port() {
   // in secondary DPDK processes (up to DPDK 21.05).
   struct rte_eth_link link;
   if (dpdk_proc_type_ == DpdkProcType::kPrimary) {
-    rte_eth_link_get(static_cast<uint8_t>(phy_port_), &link);
-    rt_assert(link.link_status == ETH_LINK_UP,
+    ret = rte_eth_link_get(phy_port_, &link);
+    rt_assert(ret == 0, "Failed to get link status for port " +
+                            std::to_string(phy_port_) + ": " + strerror(-ret));
+    rt_assert(link.link_status == RTE_ETH_LINK_UP,
               "Port " + std::to_string(phy_port_) + " is down.");
   } else {
     link = g_memzone->link_[phy_port_];
   }
 
-  if (link.link_speed != ETH_SPEED_NUM_NONE) {
+  if (link.link_speed != RTE_ETH_SPEED_NUM_NONE) {
     // link_speed is in Mbps. The 10 Gbps check below is just a sanity check.
     rt_assert(link.link_speed >= 10000, "Link too slow");
     resolve_.bandwidth_ =
@@ -238,6 +245,18 @@ static std::vector<std::string> ipconfig_helper_split(std::string input,
 
 uint32_t DpdkTransport::get_port_ipv4_addr(size_t phy_port) {
   _unused(phy_port);
+
+  // If the user provides the datapath IPv4 address explicitly, use it. This
+  // is needed on clouds that filter on the source IP (e.g., AWS with ENA),
+  // where the DPDK-bound port has no kernel interface to query.
+  const char *env_ip = getenv(kSrcIpEnvVar);
+  if (env_ip != nullptr && env_ip[0] != '\0') {
+    const uint32_t ret = ipv4_from_str(env_ip);
+    ERPC_WARN("DpdkTransport: Using IPv4 address %s from %s for port %zu\n",
+              env_ip, kSrcIpEnvVar, phy_port);
+    return ret;
+  }
+
 #ifdef _WIN32
   // Hack for now: Get the IP address of the second NIC using ipconfig.exe
   std::string ipconfig_out = "";

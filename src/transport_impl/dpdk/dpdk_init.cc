@@ -39,7 +39,9 @@ void DpdkTransport::setup_phy_port(uint16_t phy_port, size_t numa_node,
   }
 
   rte_eth_dev_info dev_info;
-  rte_eth_dev_info_get(phy_port, &dev_info);
+  int ret = rte_eth_dev_info_get(phy_port, &dev_info);
+  rt_assert(ret == 0, "Failed to get device info for port " +
+                          std::to_string(phy_port) + ": " + strerror(-ret));
   rt_assert(dev_info.rx_desc_lim.nb_max >= kNumRxRingEntries,
             "Device RX ring too small");
   rt_assert(dev_info.tx_desc_lim.nb_max >= kNumTxRingDesc,
@@ -52,21 +54,21 @@ void DpdkTransport::setup_phy_port(uint16_t phy_port, size_t numa_node,
   memset(&eth_conf, 0, sizeof(eth_conf));
 
   if (!kIsWindows) {
-    eth_conf.rxmode.mq_mode = ETH_MQ_RX_RSS;
+    eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
     eth_conf.lpbk_mode = 1;
     eth_conf.rx_adv_conf.rss_conf.rss_key =
         const_cast<uint8_t *>(kDefaultRssKey);
     eth_conf.rx_adv_conf.rss_conf.rss_key_len = 40;
-    eth_conf.rx_adv_conf.rss_conf.rss_hf = ETH_RSS_UDP;
+    eth_conf.rx_adv_conf.rss_conf.rss_hf = RTE_ETH_RSS_UDP;
   } else {
-    eth_conf.rxmode.mq_mode = ETH_MQ_RX_NONE;
+    eth_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
   }
 
-  eth_conf.txmode.mq_mode = ETH_MQ_TX_NONE;
+  eth_conf.txmode.mq_mode = RTE_ETH_MQ_TX_NONE;
   eth_conf.txmode.offloads = kOffloads;
 
-  int ret = rte_eth_dev_configure(phy_port, kMaxQueuesPerPort,
-                                  kMaxQueuesPerPort, &eth_conf);
+  ret = rte_eth_dev_configure(phy_port, kMaxQueuesPerPort, kMaxQueuesPerPort,
+                              &eth_conf);
   rt_assert(ret == 0, "Ethdev configuration error: ", strerror(-1 * ret));
 
   // Set up all RX and TX queues and start the device. This can't be done later
@@ -99,7 +101,9 @@ void DpdkTransport::setup_phy_port(uint16_t phy_port, size_t numa_node,
     rt_assert(ret == 0, "Failed to setup TX queue: " + std::to_string(i));
   }
 
-  rte_eth_dev_start(phy_port);
+  ret = rte_eth_dev_start(phy_port);
+  rt_assert(ret == 0, "Failed to start port " + std::to_string(phy_port) +
+                          ": " + strerror(-ret));
 }
 
 }  // namespace erpc
